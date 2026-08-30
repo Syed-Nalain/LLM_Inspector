@@ -110,8 +110,8 @@ count Claude requested, though the overall scan budget
 
 ## 2. Coverage gaps
 
-### 2.1 OWASP LLM Top 10 ontology is incomplete
-`agent/security_ontology.py` covers 8 categories with real technique →
+### 2.1 OWASP LLM Top 10 ontology + cross-cutting categories
+`agent/security_ontology.py` covers 8 OWASP categories with real technique →
 tool mappings. Not yet covered: LLM03 (Supply Chain) in any depth, LLM08
 (Vector/Embedding Weaknesses, relevant to RAG apps), LLM10 (Unbounded
 Consumption/resource exhaustion). Extend `OWASP_LLM_TOP_10` and the
@@ -120,20 +120,61 @@ corresponding probe/category mappings in `garak_adapter.py` /
 sync as Garak ships new probes and OWASP revises the Top 10 list —
 consider a periodic audit rather than a one-time pass.
 
-### 2.2 Promptfoo attack library is intentionally small and heuristic
-`promptfoo_adapter.py`'s `ATTACK_LIBRARY` is a handful of hand-written,
-safety-conscious canary-style prompts per category, scored with regex
-keyword matching (`_score_response`). This is deliberately simple and
-offline-capable, but it's much shallower than Garak's detector suite. To
-go deeper without depending on Promptfoo's hosted redteam plugin catalogue
-(which by default wants an LLM grader/API key and downloads its prompt
-sets from Promptfoo's cloud):
-- Expand `ATTACK_LIBRARY` with more categories/prompts per category.
-- Consider adding an optional LLM-rubric grading mode that reuses the
-  user's own Claude key (via the same `agent/claude_client.py`) instead of
-  requiring a separate grader API key — this would give much more nuanced
-  compliance judgment than regex matching, at the cost of extra Claude
-  calls (needs its own budget accounting).
+Three cross-cutting categories have been added to `manual_scan.py`'s
+`MANUAL_SCAN_CATALOG` beyond the OWASP Top 10:
+- **EVASION** (Guardrail Evasion Techniques): encoding bypass, token
+  smuggling, ANSI escape injection, glitch token exploits — all via garak
+  probes (`encoding`, `smuggling`, `ansiescape`, `glitch`).
+- **ADAPTIVE** (Adaptive / Multi-turn Attacks): Tree of Attacks
+  (`tap.TAPCached`), GOAT (`goat.GOATAttack`), automatic attack generation
+  (`atkgen.Tox`) — garak's multi-turn probe families.
+- **SOCIAL_ENG** (Social Engineering / Manipulation): grandma jailbreak,
+  Goodside injection, DeepRole attack, Foot-in-the-Door, continuation
+  attacks — garak probes targeting social engineering vectors.
+
+These are available in manual scan mode at all intensity levels.
+
+### 2.1b Scan intensity levels
+`manual_scan.py` defines 5 scan intensity presets via the `ScanIntensity`
+dataclass:
+
+| Level | Probes | Attempts | Tests | Garak buffs |
+|---|---|---|---|---|
+| `very_small` | 1 per tool/category | 5 | 2 | none |
+| `small` | all mapped | 10 | 3 | none |
+| `medium` | all mapped | 25 | 5 | none |
+| `large` | all + `LARGE_EXTRA_PROBES` | 50 | 10 | none |
+| `extended` | same as large | 50 | 10 | `encoding.Base64`, `encoding.CharCode`, `paraphrase` |
+
+The `extended` level applies garak encoding and paraphrase buffs (passed
+as `--buffs` to the garak CLI) on top of every garak probe, roughly
+doubling garak scan time. Buffs transform each probe's payloads through
+encoding layers (Base64, CharCode) and semantic rephrasing, catching
+attacks that bypass guardrails through obfuscation. The `buffs` parameter
+flows through `resolve_probes()` → `runtime.run_manual_scan()` →
+`server.py::run_garak_probe()` → `garak_adapter.py::run_garak_probe()`.
+
+### 2.2 Promptfoo attack library — two modes now available
+`promptfoo_adapter.py` provides two complementary modes:
+- **`promptfoo` (local/offline):** `ATTACK_LIBRARY` is a curated set of
+  hand-written, canary-style prompts per category, scored with regex
+  keyword matching (`_score_response`). Deliberately simple, offline-
+  capable, no API key required.
+- **`promptfoo_redteam` (LLM-generated):** Uses `promptfoo redteam`
+  with an LLM (e.g. Groq's `openai/gpt-oss-120b`) to dynamically generate
+  attack prompts, send them to the target (local Ollama), and grade
+  responses using the same LLM. Supports a `purpose` parameter describing
+  the target application to generate more contextual attacks. Uses
+  promptfoo plugins (hijacking, ascii-smuggling, prompt-extraction, etc.)
+  and strategies (jailbreak, prompt-injection, etc.).
+
+To go deeper:
+- Expand `ATTACK_LIBRARY` with more categories/prompts per category for
+  the offline mode.
+- The `REDTEAM_PLUGIN_SETS` and `STRATEGY_LIST` in `promptfoo_adapter.py`
+  can be extended as promptfoo adds new plugins.
+- Groq's free tier has an 8000 TPM limit — consider adding rate-limiting
+  or prompt compression for larger scan runs.
 
 ### 2.3 Everything that isn't detector-flagged is silently dropped
 Only evidence items where `detector_hit` is true (from Garak's real
@@ -221,15 +262,25 @@ turn out to be common.
 
 ## 4. Product surface
 
-### 4.1 No web UI yet
-Per the architecture doc's original "API / UI" component and this
-project's own scoping decision, the first version is CLI-first
-(`llm_inspector/cli/main.py`). `AgentRuntime.run_scan` already accepts an
-`on_event` callback for streaming progress, which is exactly what a
-WebSocket-backed API would need — the natural next step is a thin
-FastAPI layer exposing target management + scan-with-live-progress over
-HTTP/WebSocket, with a small frontend to enter a Claude API key, describe
-a target, and watch a scan run.
+### 4.1 Web UI — implemented (basic)
+A Flask-based web UI (`web/app.py`) now provides:
+- **Scan page** (`/`): Target selector, OWASP category checkboxes, tool
+  chips, manual vs prompt mode toggle, target details textarea (for
+  promptfoo_redteam purpose), live SSE log streaming, expandable findings
+  table. Runs on `localhost:5000`.
+- **Target registration** (`/target/new`): 3-step wizard (Target Type →
+  Connection Config → Authorization) with HTTP Endpoint and Ollama Local
+  support, auto-model-detection for Ollama, test-connection button, and
+  authorization confirmation.
+
+Still missing / future enhancements:
+- No authentication on the web UI (single-user local tool assumption).
+- No WebSocket support — uses SSE (`text/event-stream`) which is
+  sufficient but uni-directional.
+- No scan history or report browsing page (use the CLI for now).
+- No real-time target editing or deletion from the UI.
+- Consider migrating to FastAPI + WebSocket for bi-directional streaming
+  if the UI grows more interactive features.
 
 ### 4.2 Report formats
 `findings/report_generator.py` produces Markdown + JSON only. Consider

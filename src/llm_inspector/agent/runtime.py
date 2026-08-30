@@ -252,12 +252,17 @@ class AgentRuntime:
                     call_duration = time.monotonic() - started
                     budget.record_call(budget_key)
 
+                    try:
+                        _parsed_stats = json.loads(outcome.text)
+                    except (json.JSONDecodeError, TypeError):
+                        _parsed_stats = None
                     slog.log_tool_call(
                         tool_name=tc.name,
                         arguments=tc.arguments,
                         result_text=outcome.text[:4000],
                         is_error=outcome.is_error,
                         duration_seconds=round(call_duration, 1),
+                        result_stats=_parsed_stats,
                     )
 
                     self.db.log_tool_call(
@@ -464,6 +469,7 @@ class AgentRuntime:
         max_attempts: int = 20,
         num_tests: int = 5,
         purpose: str = "security testing of an LLM application",
+        intensity: str = "medium",
         on_event=None,
     ) -> ScanResult:
         """Run a scan without the Brain LLM — probes are determined
@@ -497,6 +503,7 @@ class AgentRuntime:
 
         probe_calls = resolve_probes(
             owasp_ids, tools, target_id, max_attempts, num_tests, purpose,
+            intensity=intensity,
         )
         plan = [
             {
@@ -509,7 +516,7 @@ class AgentRuntime:
             for c in probe_calls
         ]
 
-        emit(f"Manual scan: {len(probe_calls)} probe(s) across {', '.join(tools)} for {', '.join(owasp_ids)}")
+        emit(f"Manual scan [{intensity}]: {len(probe_calls)} probe(s) across {', '.join(tools)} for {', '.join(owasp_ids)}")
 
         candidates: list[CandidateEvidence] = []
 
@@ -525,12 +532,17 @@ class AgentRuntime:
                 call_duration = time.monotonic() - started
                 budget.record_call(TOOL_TO_BUDGET_KEY.get(call["tool_name"], call["tool_name"]))
 
+                try:
+                    _parsed_stats = json.loads(outcome.text)
+                except (json.JSONDecodeError, TypeError):
+                    _parsed_stats = None
                 slog.log_tool_call(
                     tool_name=call["tool_name"],
                     arguments=call["args"],
                     result_text=outcome.text[:4000],
                     is_error=outcome.is_error,
                     duration_seconds=round(call_duration, 1),
+                    result_stats=_parsed_stats,
                 )
                 self.db.log_tool_call(
                     call_id=uuid.uuid4().hex[:12],

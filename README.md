@@ -62,6 +62,7 @@ design rationale and the original architecture notes this was built from.
 | **Anthropic** (Claude) | claude-sonnet-4-20250514, claude-opus-4-5-20251101, etc. | `ANTHROPIC_API_KEY` |
 | **OpenAI** | gpt-4o, o3, gpt-4.1, etc. | `OPENAI_API_KEY` |
 | **Google Gemini** | gemini-2.5-flash, gemini-2.5-pro, etc. | `GEMINI_API_KEY` |
+| **Groq** | openai/gpt-oss-120b, llama-3.3-70b-versatile, etc. | `GROQ_API_KEY` |
 | **Ollama** (local) | qwen2.5:7b, qwen2.5:14b, llama3.1, mistral, etc. | None needed |
 
 The provider is auto-detected from whichever API key is set, or you can
@@ -76,14 +77,16 @@ This is a genuinely working first version, not a mockup:
 |---|---|
 | Agent Runtime (Planner → Executor → Critic, budget, memory) | **Real** |
 | MCP client/server plumbing (3 servers: red team, blue team, evaluation) | **Real** |
-| Multi-provider LLM support (Claude, GPT-4o, Gemini, Ollama) | **Real** |
+| Multi-provider LLM support (Claude, GPT-4o, Gemini, Ollama, Groq) | **Real** |
 | Garak integration | **Real** — shells out to `garak`, parses its real report output |
 | Promptfoo integration | **Real** — curated attack-prompt library run via `promptfoo eval` |
+| Promptfoo Redteam (LLM-generated attacks) | **Real** — uses Groq/OpenAI-compatible LLM to generate + grade dynamic attacks |
+| Manual scan mode (no Brain LLM for planning) | **Real** — select OWASP categories + tools directly, Critic still validates |
 | Structured scan logging | **Real** — full audit trail per scan |
 | PyRIT integration | **Stub** — structurally wired in, returns synthetic data (see below) |
 | LlamaGuard / NeMo Guardrails | **Stub** — keyword heuristics, not real model inference |
 | CLI (target management, scans, reports) | **Real** |
-| Web UI | Not built yet (CLI-first, see EXTENDED_README.md) |
+| Web UI (scan + target registration) | **Real** — Flask app on localhost:5000 with live SSE logs |
 
 Every stub is clearly labeled `"stub": true` in its output, the system
 prompt tells the LLM to treat stub results as unverified, and the Critic
@@ -95,7 +98,8 @@ finished product — read it before relying on this for anything real.
 
 ## Installation
 
-Requires Python 3.10+, and Node.js/npm (for Promptfoo).
+Requires Python 3.10+, and Node.js/npm (for Promptfoo). Flask is included
+for the web UI.
 
 ```bash
 git clone <this repo>
@@ -194,6 +198,88 @@ finishes:
 llm-inspector scan list
 llm-inspector scan report <scan_id>
 ```
+
+## Web UI
+
+LLM Inspector ships a Flask-based web UI on `localhost:5000` for users who
+prefer a graphical interface over the CLI.
+
+```bash
+llm-inspector-web
+# or:
+python -m llm_inspector.web.app
+```
+
+The web UI provides:
+
+- **Scan page** (`/`): Select a registered target, choose OWASP categories
+  and tools via checkboxes (manual mode) or type a natural-language prompt
+  (brain LLM mode). Add target details to guide promptfoo_redteam attack
+  generation. Live scan logs stream via SSE, and findings display in an
+  expandable results table.
+- **Target registration** (`/target/new`): A step-by-step wizard to register
+  new targets — choose target type (HTTP endpoint or Ollama local),
+  configure connection details (URL, headers, body template, response path),
+  test the connection, and confirm authorization. Ollama targets auto-detect
+  available models.
+
+## Manual scan mode
+
+Manual mode lets you select OWASP categories and tools directly without
+the Brain LLM planning phase — useful when you know exactly what to test.
+The Critic (Brain LLM) still validates findings after probes run.
+
+```bash
+# List available OWASP categories and tools:
+llm-inspector scan categories
+
+# Run a manual scan:
+llm-inspector scan manual \
+  --target <target_id> \
+  --vuln LLM01 --vuln LLM07 \
+  --tool garak --tool promptfoo_redteam \
+  --purpose "a customer support chatbot for a bank" \
+  --intensity medium
+
+# Scan all categories with all tools:
+llm-inspector scan manual \
+  --target <target_id> \
+  --vuln all --tool all
+```
+
+The `--purpose` flag describes the target application (e.g. "a customer
+support chatbot for a banking application"). This is passed to
+promptfoo_redteam to generate more targeted, contextual attack prompts.
+
+### Scan intensity levels
+
+The `--intensity` flag controls probe count, attempt limits, and
+optional garak encoding buffs:
+
+| Intensity | Probes | Attempts | Tests | Garak buffs |
+|---|---|---|---|---|
+| `very_small` | 1 per tool per category | 5 | 2 | — |
+| `small` | All mapped | 10 | 3 | — |
+| `medium` (default) | All mapped | 25 | 5 | — |
+| `large` | All mapped + extra probe families | 50 | 10 | — |
+| `extended` | Same as large + encoding/paraphrase transforms | 50 | 10 | Base64, CharCode, paraphrase |
+
+The `extended` level applies garak encoding and paraphrase buffs on top
+of every garak probe, roughly doubling garak scan time but catching
+attacks that bypass guardrails through character encoding or rephrasing.
+
+### Vulnerability categories
+
+Beyond the OWASP LLM Top 10 (LLM01–LLM09), LLM Inspector includes three
+cross-cutting categories that test techniques spanning multiple risk areas:
+
+| Category | Name | Techniques |
+|---|---|---|
+| `EVASION` | Guardrail Evasion | Encoding bypass, token smuggling, ANSI escape injection, glitch token exploits |
+| `ADAPTIVE` | Adaptive / Multi-turn Attacks | Tree of Attacks (TAP), GOAT, automatic attack generation |
+| `SOCIAL_ENG` | Social Engineering / Manipulation | Grandma jailbreak, Goodside injection, DeepRole, Foot-in-the-Door, continuation attacks |
+
+These use garak probes and are available in all intensity levels.
 
 ## Scan logs
 

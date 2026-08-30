@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Register Target — LLM Inspector</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e1e4e8; min-height: 100vh; }
+
+  .header { background: #161b22; border-bottom: 1px solid #30363d; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+  .header h1 { font-size: 20px; font-weight: 600; }
+  .header .badge { background: #238636; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 12px; }
+  .header a { color: #58a6ff; text-decoration: none; font-size: 14px; margin-left: auto; }
+  .header a:hover { text-decoration: underline; }
+
+  .container { max-width: 720px; margin: 32px auto; padding: 0 24px; }
+
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 24px; margin-bottom: 16px; }
+  .card h2 { font-size: 15px; font-weight: 600; margin-bottom: 16px; color: #58a6ff; }
+
+  select, input[type="text"], input[type="number"], textarea {
+    width: 100%; padding: 8px 12px; background: #0d1117; border: 1px solid #30363d;
+    border-radius: 6px; color: #e1e4e8; font-size: 14px; outline: none;
+  }
+  select:focus, input:focus, textarea:focus { border-color: #58a6ff; }
+  textarea { resize: vertical; min-height: 80px; font-family: inherit; }
+
+  label { font-size: 13px; color: #8b949e; display: block; margin-bottom: 4px; }
+  .field { margin-bottom: 16px; }
+  .hint { font-size: 12px; color: #6e7681; margin-top: 4px; }
+
+  .btn { padding: 10px 24px; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .btn-primary { background: #238636; color: #fff; }
+  .btn-primary:hover { background: #2ea043; }
+  .btn-primary:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+  .btn-secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+  .btn-secondary:hover { background: #30363d; }
+  .btn-danger { background: #da3633; color: #fff; }
+
+  /* Stepper */
+  .stepper { display: flex; gap: 0; margin-bottom: 24px; }
+  .step-indicator { flex: 1; text-align: center; padding: 12px 8px; font-size: 13px; font-weight: 600; color: #484f58; background: #0d1117; border: 1px solid #30363d; position: relative; cursor: default; }
+  .step-indicator:first-child { border-radius: 6px 0 0 6px; }
+  .step-indicator:last-child { border-radius: 0 6px 6px 0; }
+  .step-indicator.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+  .step-indicator.done { background: #238636; color: #fff; border-color: #238636; }
+  .step-num { display: inline-block; width: 22px; height: 22px; line-height: 22px; border-radius: 50%; background: #30363d; color: #8b949e; font-size: 12px; margin-right: 6px; text-align: center; }
+  .step-indicator.active .step-num { background: rgba(255,255,255,0.2); color: #fff; }
+  .step-indicator.done .step-num { background: rgba(255,255,255,0.2); color: #fff; }
+
+  .step-panel { display: none; }
+  .step-panel.active { display: block; }
+
+  /* Target type cards */
+  .type-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .type-card { padding: 20px; background: #0d1117; border: 2px solid #30363d; border-radius: 8px; cursor: pointer; transition: all 0.2s; text-align: center; }
+  .type-card:hover { border-color: #58a6ff; }
+  .type-card.selected { border-color: #1f6feb; background: #0d1b2e; }
+  .type-card .icon { font-size: 32px; margin-bottom: 8px; }
+  .type-card .type-name { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .type-card .type-desc { font-size: 12px; color: #8b949e; }
+
+  /* Test connection */
+  .test-bar { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+  .test-result { font-size: 13px; }
+  .test-result.ok { color: #3fb950; }
+  .test-result.fail { color: #f85149; }
+
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Auth checkbox */
+  .auth-check { display: flex; align-items: flex-start; gap: 10px; padding: 14px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; margin-bottom: 16px; cursor: pointer; }
+  .auth-check input[type="checkbox"] { margin-top: 3px; accent-color: #58a6ff; }
+  .auth-check-label { font-size: 14px; font-weight: 500; }
+  .auth-check-desc { font-size: 12px; color: #8b949e; margin-top: 2px; }
+
+  /* Nav buttons */
+  .step-nav { display: flex; justify-content: space-between; margin-top: 20px; }
+
+  /* Success */
+  .success-box { text-align: center; padding: 32px; }
+  .success-box .check { font-size: 48px; color: #3fb950; margin-bottom: 12px; }
+  .success-box h3 { font-size: 18px; margin-bottom: 8px; }
+  .success-box p { font-size: 14px; color: #8b949e; margin-bottom: 20px; }
+
+  .inline-row { display: flex; gap: 12px; }
+  .inline-row .field { flex: 1; }
+
+  .headers-list { margin-bottom: 12px; }
+  .header-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .header-row input { flex: 1; }
+  .header-row .remove-btn { background: none; border: none; color: #f85149; cursor: pointer; font-size: 18px; padding: 4px 8px; }
+  .add-header-btn { font-size: 13px; color: #58a6ff; cursor: pointer; background: none; border: none; }
+  .add-header-btn:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>LLM Inspector</h1>
+  <span class="badge">Register Target</span>
+  <a href="/">&larr; Back to Scanner</a>
+</div>
+
+<div class="container">
+  <!-- Stepper -->
+  <div class="stepper">
+    <div class="step-indicator active" id="step-ind-1"><span class="step-num">1</span>Target Type</div>
+    <div class="step-indicator" id="step-ind-2"><span class="step-num">2</span>Connection</div>
+    <div class="step-indicator" id="step-ind-3"><span class="step-num">3</span>Authorization</div>
+  </div>
+
+  <!-- Step 1: Target Type -->
+  <div class="step-panel active" id="step-1">
+    <div class="card">
+      <h2>Select Target Type</h2>
+      <div class="type-cards">
+        <div class="type-card" onclick="selectType('http')">
+          <div class="icon">&#x1F310;</div>
+          <div class="type-name">HTTP Endpoint</div>
+          <div class="type-desc">Any REST API endpoint that accepts a prompt and returns a response (OpenAI-compatible, custom APIs, etc.)</div>
+        </div>
+        <div class="type-card" onclick="selectType('ollama')">
+          <div class="icon">&#x1F9E0;</div>
+          <div class="type-name">Ollama Local</div>
+          <div class="type-desc">Local Ollama instance running on your machine. Auto-detects available models.</div>
+        </div>
+      </div>
+      <div class="step-nav">
+        <div></div>
+        <button class="btn btn-primary" id="btn-next-1" disabled onclick="goStep(2)">Next &rarr;</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2: Connection Config -->
+  <div class="step-panel" id="step-2">
+    <div class="card">
+      <h2>Connection Configuration</h2>
+
+      <div class="inline-row">
+        <div class="field">
+          <label>Target Name *</label>
+          <input type="text" id="target-name" placeholder="e.g. My Customer Support Bot">
+        </div>
+        <div class="field">
+          <label>Description</label>
+          <input type="text" id="target-desc" placeholder="e.g. GPT-4o powered chat API">
+        </div>
+      </div>
+
+      <!-- HTTP fields -->
+      <div id="http-fields">
+        <div class="inline-row">
+          <div class="field" style="flex: 2;">
+            <label>Endpoint URL *</label>
+            <input type="text" id="target-url" placeholder="https://api.example.com/chat">
+          </div>
+          <div class="field" style="flex: 0.8;">
+            <label>Method</label>
+            <select id="target-method">
+              <option value="post">POST</option>
+              <option value="get">GET</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Headers</label>
+          <div class="headers-list" id="headers-list">
+            <div class="header-row">
+              <input type="text" placeholder="Key (e.g. Authorization)" class="hdr-key">
+              <input type="text" placeholder="Value (e.g. Bearer sk-...)" class="hdr-val">
+              <button class="remove-btn" onclick="this.parentElement.remove()">&times;</button>
+            </div>
+          </div>
+          <button class="add-header-btn" onclick="addHeader()">+ Add Header</button>
+        </div>
+
+        <div class="field">
+          <label>Request Body Template (JSON)</label>
+          <textarea id="body-template" placeholder='{"messages": [{"role": "user", "content": "$INPUT"}]}'></textarea>
+          <div class="hint">Use <code>$INPUT</code> to mark where the attack prompt goes.</div>
+        </div>
+
+        <div class="field">
+          <label>Response Text Path</label>
+          <input type="text" id="response-path" placeholder="e.g. choices.0.message.content" value="response">
+          <div class="hint">Dot-separated path to extract the reply text from the JSON response.</div>
+        </div>
+      </div>
+
+      <!-- Ollama fields -->
+      <div id="ollama-fields" style="display: none;">
+        <div class="inline-row">
+          <div class="field" style="flex: 2;">
+            <label>Ollama URL</label>
+            <input type="text" id="ollama-url" value="http://localhost:11434" placeholder="http://localhost:11434">
+          </div>
+          <div class="field" style="flex: 1;">
+            <label>Model</label>
+            <select id="ollama-model">
+              <option value="">Loading models...</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-secondary" onclick="refreshOllamaModels()" style="margin-bottom: 16px;">Refresh Models</button>
+      </div>
+
+      <!-- Test connection -->
+      <div class="test-bar">
+        <button class="btn btn-secondary" onclick="testConnection()">Test Connection</button>
+        <span id="test-result" class="test-result"></span>
+      </div>
+
+      <div class="step-nav">
+        <button class="btn btn-secondary" onclick="goStep(1)">&larr; Back</button>
+        <button class="btn btn-primary" id="btn-next-2" onclick="goStep(3)">Next &rarr;</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3: Authorization -->
+  <div class="step-panel" id="step-3">
+    <div class="card">
+      <h2>Authorization</h2>
+
+      <div class="field">
+        <label>Authorized By *</label>
+        <input type="text" id="authorized-by" placeholder="Your name or email">
+        <div class="hint">The person who owns or has written authorization to security-test this target.</div>
+      </div>
+
+      <div class="auth-check" onclick="document.getElementById('auth-confirm').click()">
+        <input type="checkbox" id="auth-confirm" onclick="event.stopPropagation()">
+        <div>
+          <div class="auth-check-label">I confirm I am authorized to test this target</div>
+          <div class="auth-check-desc">I own this target or have explicit written authorization to perform security testing. Unauthorized scanning of third-party systems may be illegal.</div>
+        </div>
+      </div>
+
+      <div id="register-error" style="color: #f85149; font-size: 13px; margin-bottom: 12px; display: none;"></div>
+
+      <div class="step-nav">
+        <button class="btn btn-secondary" onclick="goStep(2)">&larr; Back</button>
+        <button class="btn btn-primary" id="btn-register" onclick="registerTarget()">Register Target</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Success panel (hidden) -->
+  <div class="step-panel" id="step-success">
+    <div class="card">
+      <div class="success-box">
+        <div class="check">&#x2705;</div>
+        <h3 id="success-name">Target Registered!</h3>
+        <p id="success-id">ID: ...</p>
+        <a href="/"><button class="btn btn-primary">Go to Scanner</button></a>
+        <button class="btn btn-secondary" onclick="resetForm()" style="margin-left: 8px;">Register Another</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let selectedType = null;
+let currentStep = 1;
+
+function selectType(type) {
+  selectedType = type;
+  document.querySelectorAll('.type-card').forEach(c => c.classList.remove('selected'));
+  event.currentTarget.classList.add('selected');
+  document.getElementById('btn-next-1').disabled = false;
+
+  if (type === 'ollama') {
+    document.getElementById('http-fields').style.display = 'none';
+    document.getElementById('ollama-fields').style.display = 'block';
+    refreshOllamaModels();
+  } else {
+    document.getElementById('http-fields').style.display = 'block';
+    document.getElementById('ollama-fields').style.display = 'none';
+  }
+}
+
+function goStep(n) {
+  document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('step-' + n).classList.add('active');
+
+  for (let i = 1; i <= 3; i++) {
+    const ind = document.getElementById('step-ind-' + i);
+    ind.classList.remove('active', 'done');
+    if (i < n) ind.classList.add('done');
+    if (i === n) ind.classList.add('active');
+  }
+  currentStep = n;
+}
+
+function addHeader() {
+  const list = document.getElementById('headers-list');
+  const row = document.createElement('div');
+  row.className = 'header-row';
+  row.innerHTML = '<input type="text" placeholder="Key" class="hdr-key"><input type="text" placeholder="Value" class="hdr-val"><button class="remove-btn" onclick="this.parentElement.remove()">&times;</button>';
+  list.appendChild(row);
+}
+
+function getHeaders() {
+  const headers = {};
+  document.querySelectorAll('.header-row').forEach(row => {
+    const key = row.querySelector('.hdr-key').value.trim();
+    const val = row.querySelector('.hdr-val').value.trim();
+    if (key) headers[key] = val;
+  });
+  return headers;
+}
+
+function getFormData() {
+  const name = document.getElementById('target-name').value.trim();
+  const desc = document.getElementById('target-desc').value.trim();
+
+  if (selectedType === 'ollama') {
+    const ollamaUrl = document.getElementById('ollama-url').value.trim();
+    const model = document.getElementById('ollama-model').value;
+    return {
+      name: name || ('Ollama ' + model),
+      description: desc || ('Local Ollama model: ' + model),
+      url: ollamaUrl + '/api/chat',
+      method: 'post',
+      headers: {},
+      body_template: { model: model, messages: [{ role: 'user', content: '$INPUT' }], stream: false },
+      response_path: 'message.content',
+    };
+  } else {
+    let bodyTemplate = {};
+    const bodyStr = document.getElementById('body-template').value.trim();
+    if (bodyStr) {
+      try { bodyTemplate = JSON.parse(bodyStr); }
+      catch(e) { bodyTemplate = { input: '$INPUT' }; }
+    } else {
+      bodyTemplate = { input: '$INPUT' };
+    }
+    return {
+      name: name,
+      description: desc,
+      url: document.getElementById('target-url').value.trim(),
+      method: document.getElementById('target-method').value,
+      headers: getHeaders(),
+      body_template: bodyTemplate,
+      response_path: document.getElementById('response-path').value.trim() || 'response',
+    };
+  }
+}
+
+async function refreshOllamaModels() {
+  const url = document.getElementById('ollama-url').value.trim();
+  const sel = document.getElementById('ollama-model');
+  sel.innerHTML = '<option value="">Loading...</option>';
+  try {
+    const resp = await fetch('/target/ollama-models?url=' + encodeURIComponent(url));
+    const data = await resp.json();
+    if (data.models && data.models.length > 0) {
+      sel.innerHTML = data.models.map(m => '<option value="' + m + '">' + m + '</option>').join('');
+    } else {
+      sel.innerHTML = '<option value="">No models found</option>';
+    }
+  } catch(e) {
+    sel.innerHTML = '<option value="">Error loading models</option>';
+  }
+}
+
+async function testConnection() {
+  const resultEl = document.getElementById('test-result');
+  resultEl.innerHTML = '<span class="spinner"></span> Testing...';
+  resultEl.className = 'test-result';
+
+  const formData = getFormData();
+  try {
+    const resp = await fetch('/target/test-connection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(formData),
+    });
+    const data = await resp.json();
+    if (data.success) {
+      resultEl.className = 'test-result ok';
+      resultEl.textContent = 'Connected! (HTTP ' + data.status_code + ') Response: ' + (data.response || '').substring(0, 100) + '...';
+    } else {
+      resultEl.className = 'test-result fail';
+      resultEl.textContent = 'Failed: ' + data.error;
+    }
+  } catch(e) {
+    resultEl.className = 'test-result fail';
+    resultEl.textContent = 'Error: ' + e.message;
+  }
+}
+
+async function registerTarget() {
+  const errEl = document.getElementById('register-error');
+  errEl.style.display = 'none';
+
+  if (!document.getElementById('auth-confirm').checked) {
+    errEl.textContent = 'You must confirm authorization to register the target.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const authBy = document.getElementById('authorized-by').value.trim();
+  if (!authBy) {
+    errEl.textContent = 'Please enter who authorized this target for testing.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const formData = getFormData();
+  if (!formData.name) {
+    errEl.textContent = 'Target name is required.';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (!formData.url) {
+    errEl.textContent = 'Endpoint URL is required.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const btn = document.getElementById('btn-register');
+  btn.disabled = true;
+  btn.textContent = 'Registering...';
+
+  try {
+    const resp = await fetch('/target/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...formData, authorized_by: authBy }),
+    });
+    const data = await resp.json();
+    if (data.success) {
+      document.getElementById('success-name').textContent = data.name + ' Registered!';
+      document.getElementById('success-id').textContent = 'Target ID: ' + data.target_id;
+      document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('step-success').classList.add('active');
+      for (let i = 1; i <= 3; i++) {
+        document.getElementById('step-ind-' + i).classList.remove('active');
+        document.getElementById('step-ind-' + i).classList.add('done');
+      }
+    } else {
+      errEl.textContent = data.error || 'Registration failed.';
+      errEl.style.display = 'block';
+    }
+  } catch(e) {
+    errEl.textContent = 'Error: ' + e.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Register Target';
+  }
+}
+
+function resetForm() {
+  selectedType = null;
+  document.querySelectorAll('.type-card').forEach(c => c.classList.remove('selected'));
+  document.getElementById('btn-next-1').disabled = true;
+  document.getElementById('target-name').value = '';
+  document.getElementById('target-desc').value = '';
+  document.getElementById('target-url').value = '';
+  document.getElementById('body-template').value = '';
+  document.getElementById('response-path').value = 'response';
+  document.getElementById('authorized-by').value = '';
+  document.getElementById('auth-confirm').checked = false;
+  document.getElementById('test-result').textContent = '';
+  document.getElementById('register-error').style.display = 'none';
+  document.getElementById('headers-list').innerHTML = '<div class="header-row"><input type="text" placeholder="Key (e.g. Authorization)" class="hdr-key"><input type="text" placeholder="Value (e.g. Bearer sk-...)" class="hdr-val"><button class="remove-btn" onclick="this.parentElement.remove()">&times;</button></div>';
+  goStep(1);
+}
+</script>
+</body>
+</html>

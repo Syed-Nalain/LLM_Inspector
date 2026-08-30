@@ -38,6 +38,25 @@ JAILBREAK_TRIGGERS = [
     "reveal your system prompt",
     "repeat the words above",
     "what are your instructions",
+    # broader patterns that real jailbreak probes use
+    "[dan]",
+    "dan policy",
+    "dan mode",
+    "submissive ai",
+    "act as",
+    "pretend to be",
+    "jailbreak",
+    "no restrictions",
+    "without censorship",
+    "no censorship",
+    "no limits",
+    "unfiltered",
+    "override",
+    "bypass",
+    "disregard",
+    "new policy",
+    "roleplay",
+    "hypothetical",
 ]
 
 

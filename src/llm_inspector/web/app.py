@@ -14,7 +14,9 @@ import queue
 import threading
 from pathlib import Path
 
-from flask import Flask, Response, render_template, request
+import requests as http_requests
+
+from flask import Flask, Response, redirect, render_template, request, url_for
 
 from llm_inspector.agent.manual_scan import MANUAL_SCAN_CATALOG, list_categories
 from llm_inspector.agent.runtime import AgentRuntime
@@ -62,6 +64,9 @@ def start_scan():
     scan_queue = queue.Queue()
     scan_id_holder = [None]
 
+    import uuid as _uuid
+    stream_id = _uuid.uuid4().hex[:12]
+
     def run_in_thread():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -75,18 +80,11 @@ def start_scan():
             scan_queue.put(None)
             loop.close()
 
+    scan_logs[stream_id] = scan_queue
     t = threading.Thread(target=run_in_thread, daemon=True)
     t.start()
 
-    import time
-    for _ in range(50):
-        time.sleep(0.1)
-        if scan_id_holder[0]:
-            break
-
-    sid = scan_id_holder[0] or "pending"
-    scan_logs[sid] = scan_queue
-    return {"scan_id": sid}
+    return {"scan_id": stream_id}
 
 
 async def _run_scan(data, scan_mode, log_queue, scan_id_holder):
@@ -106,10 +104,6 @@ async def _run_scan(data, scan_mode, log_queue, scan_id_holder):
             log_queue.put({"type": "error", "message": "No prompt provided"})
             return
 
-        import uuid
-        sid = uuid.uuid4().hex[:12]
-        scan_id_holder[0] = sid
-
         on_event(f"Brain LLM mode — prompt: {prompt_text}")
         result = await runtime.run_scan(
             target_id=target_id,
@@ -124,11 +118,8 @@ async def _run_scan(data, scan_mode, log_queue, scan_id_holder):
             log_queue.put({"type": "error", "message": "Select at least one vulnerability and one tool"})
             return
 
-        import uuid
-        sid = uuid.uuid4().hex[:12]
-        scan_id_holder[0] = sid
-
         purpose = data.get("purpose", "security testing of an LLM application")
+        intensity = data.get("intensity", "medium")
         result = await runtime.run_manual_scan(
             target_id=target_id,
             owasp_ids=vulns,
@@ -137,8 +128,11 @@ async def _run_scan(data, scan_mode, log_queue, scan_id_holder):
             max_attempts=int(data.get("max_attempts", 20)),
             num_tests=int(data.get("num_tests", 5)),
             purpose=purpose,
+            intensity=intensity,
             on_event=on_event,
         )
+
+    scan_id_holder[0] = result.scan_id
 
     paths = write_reports(
         result,
@@ -187,6 +181,99 @@ def stream_logs(scan_id):
             yield f"data: {json.dumps(item)}\n\n"
 
     return Response(generate(), mimetype="text/event-stream")
+
+
+@app.route("/target/new")
+def target_new():
+    return render_template("target_new.html")
+
+
+@app.route("/target/ollama-models")
+def ollama_models():
+    ollama_url = request.args.get("url", "http://localhost:11434")
+    try:
+        resp = http_requests.get(f"{ollama_url}/api/tags", timeout=5)
+        resp.raise_for_status()
+        models = [m["name"] for m in resp.json().get("models", [])]
+        return {"models": models}
+    except Exception as e:
+        return {"error": str(e), "models": []}
+
+
+@app.route("/target/test-connection", methods=["POST"])
+def test_connection():
+    data = request.get_json()
+    url = data.get("url", "")
+    method = data.get("method", "POST").upper()
+    headers = data.get("headers", {})
+    body_template = data.get("body_template", {})
+    response_path = data.get("response_path", "")
+
+    body_str = json.dumps(body_template).replace('"$INPUT"', '"Hello, are you there?"')
+    body_str = body_str.replace("$INPUT", "Hello, are you there?")
+    try:
+        body = json.loads(body_str)
+    except json.JSONDecodeError:
+        return {"error": "Invalid body template JSON"}
+
+    try:
+        if method == "POST":
+            resp = http_requests.post(url, json=body, headers=headers, timeout=15)
+        else:
+            resp = http_requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+        result = resp.json()
+
+        reply = result
+        for key in response_path.split("."):
+            if key and isinstance(reply, dict):
+                reply = reply.get(key, "")
+
+        return {
+            "success": True,
+            "status_code": resp.status_code,
+            "response": str(reply)[:500],
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.route("/target/register", methods=["POST"])
+def target_register():
+    data = request.get_json()
+    name = data.get("name", "").strip()
+    description = data.get("description", "").strip()
+    url = data.get("url", "").strip()
+    method = data.get("method", "post").lower()
+    headers = data.get("headers", {})
+    body_template = data.get("body_template", {})
+    response_path = data.get("response_path", "")
+    authorized_by = data.get("authorized_by", "").strip()
+
+    if not name or not url or not authorized_by:
+        return {"error": "Name, URL, and Authorized By are required."}, 400
+
+    if isinstance(body_template, str):
+        try:
+            body_template = json.loads(body_template)
+        except json.JSONDecodeError:
+            return {"error": "Invalid body template JSON."}, 400
+
+    settings = get_settings()
+    db = Database(settings.db_path)
+    manager = TargetManager(db)
+    target = manager.register(
+        name=name,
+        description=description,
+        uri=url,
+        method=method,
+        headers=headers,
+        request_template=body_template,
+        response_text_path=response_path,
+        authorized_by=authorized_by,
+        tags=data.get("tags", []),
+    )
+    return {"success": True, "target_id": target.id, "name": target.name}
 
 
 def main():

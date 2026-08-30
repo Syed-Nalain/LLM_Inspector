@@ -50,15 +50,18 @@ def _get_authorized_target(target_id: str):
 
 @mcp.tool()
 async def run_garak_probe(
-    probe_name: str, target_id: str, max_attempts: int = 20
+    probe_name: str, target_id: str, max_attempts: int = 20,
+    buffs: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Run a Garak security probe. Returns attempts, successful, asr, evidence."""
+    """Run a Garak security probe. Returns attempts, successful, asr, evidence.
+    Optional buffs: list of garak buff selectors (e.g. 'encoding.Base64') to transform probes."""
     target = _get_authorized_target(target_id)
     return await garak_adapter.run_garak_probe(
         probe_name=probe_name,
         target_config=target.rest_config,
         max_attempts=max_attempts,
         work_dir=_settings.data_dir,
+        buffs=buffs,
     )
 
 

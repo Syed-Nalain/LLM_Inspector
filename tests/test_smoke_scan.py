@@ -85,8 +85,11 @@ class FakeLLMClient(BaseLLMClient):
             }
             return LLMResponse(text=json.dumps(verdict), input_tokens=100, output_tokens=100)
 
-        # Executor phase
-        m = re.search(r"target_id: (\S+)", system)
+        # Executor phase — extract target_id from the system prompt
+        # Format is: target_id="<id>" or TARGET: <id> |
+        m = re.search(r'target_id="([^"]+)"', system)
+        if not m:
+            m = re.search(r"TARGET:\s*(\S+)\s*\|", system)
         target_id = m.group(1) if m else "unknown"
         self.executor_calls += 1
 

@@ -155,6 +155,7 @@ class ScanLogger:
         result_text: str,
         is_error: bool,
         duration_seconds: float,
+        result_stats: dict | None = None,
     ) -> None:
         self._tool_call_count += 1
         status = "ERROR" if is_error else "OK"
@@ -169,33 +170,37 @@ class ScanLogger:
         args_str = json.dumps(arguments, indent=2)
         self._block("Arguments", args_str, max_lines=10)
 
-        # Parse result for probe stats if it's a structured tool result
-        try:
-            result_data = json.loads(result_text)
-            if isinstance(result_data, dict) and not is_error:
-                attempts = result_data.get("attempts", 0)
-                successful = result_data.get("successful", 0)
-                asr = result_data.get("asr", 0)
-                probe = result_data.get("probe") or result_data.get("test_category", "?")
-                self._total_probes += attempts
-                self._total_probes_hit += successful
-                self._append(f"\n      Probe    : {probe}")
-                self._append(f"      Attempts : {attempts}")
-                self._append(f"      Hits     : {successful}")
-                self._append(f"      ASR      : {asr:.0%}" if isinstance(asr, float) else f"      ASR      : {asr}")
-                evidence = result_data.get("evidence", [])
-                if evidence:
-                    self._append(f"      Evidence items: {len(evidence)}")
-                    for j, ev in enumerate(evidence[:3]):
-                        hit = ev.get("detector_hit", False)
-                        marker = "HIT" if hit else "miss"
-                        attack_preview = str(ev.get("attack", ""))[:100]
-                        self._append(f"        [{marker}] {attack_preview}")
-            elif isinstance(result_data, dict) and "error" in result_data:
-                self._block("Error Detail", result_data["error"], max_lines=5)
-                if result_data.get("log_tail"):
-                    self._block("Garak Log Tail", result_data["log_tail"], max_lines=10)
-        except (json.JSONDecodeError, TypeError):
+        result_data = result_stats
+        if result_data is None:
+            try:
+                result_data = json.loads(result_text)
+            except (json.JSONDecodeError, TypeError):
+                result_data = None
+
+        if isinstance(result_data, dict) and not is_error:
+            attempts = result_data.get("attempts", 0)
+            successful = result_data.get("successful", 0)
+            asr = result_data.get("asr", 0)
+            probe = result_data.get("probe") or result_data.get("test_category", "?")
+            self._total_probes += attempts
+            self._total_probes_hit += successful
+            self._append(f"\n      Probe    : {probe}")
+            self._append(f"      Attempts : {attempts}")
+            self._append(f"      Hits     : {successful}")
+            self._append(f"      ASR      : {asr:.0%}" if isinstance(asr, float) else f"      ASR      : {asr}")
+            evidence = result_data.get("evidence", [])
+            if evidence:
+                self._append(f"      Evidence items: {len(evidence)}")
+                for j, ev in enumerate(evidence[:3]):
+                    hit = ev.get("detector_hit", False)
+                    marker = "HIT" if hit else "miss"
+                    attack_preview = str(ev.get("attack", ""))[:100]
+                    self._append(f"        [{marker}] {attack_preview}")
+        elif isinstance(result_data, dict) and "error" in result_data:
+            self._block("Error Detail", result_data["error"], max_lines=5)
+            if result_data.get("log_tail"):
+                self._block("Garak Log Tail", result_data["log_tail"], max_lines=10)
+        elif result_data is None:
             self._block("Raw Result", result_text[:2000], max_lines=15)
 
     # ── Critic ─────────────────────────────────────────────

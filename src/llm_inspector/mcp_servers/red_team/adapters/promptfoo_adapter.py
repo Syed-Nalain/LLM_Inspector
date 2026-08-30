@@ -214,7 +214,7 @@ async def run_promptfoo_test(
             "duration_seconds": round(duration, 2),
         }
 
-    raw = json.loads(output_path.read_text())
+    raw = json.loads(output_path.read_text(encoding="utf-8"))
     rows = raw.get("results", {}).get("results", [])
 
     hit_patterns = spec["hit_patterns"]
@@ -222,7 +222,7 @@ async def run_promptfoo_test(
     successful = 0
     for row in rows:
         attack = row.get("vars", {}).get("attack", "")
-        output_text = row.get("response", {}).get("output", "") or ""
+        output_text = (row.get("response") or {}).get("output", "") or ""
         hit = _score_response(output_text, hit_patterns)
         if hit:
             successful += 1
@@ -271,7 +271,7 @@ PROVIDER_TO_PROMPTFOO: dict[str, dict[str, str]] = {
     },
     "gemini": {
         "prefix": "google:",
-        "env_key": "GEMINI_API_KEY",
+        "env_key": "GOOGLE_API_KEY",
     },
     "ollama": {
         "prefix": "ollama:chat:",
@@ -505,11 +505,23 @@ async def run_promptfoo_redteam(
 
     evidence: list[dict[str, Any]] = []
     successful = 0
+    skipped_errors = 0
     for row in rows:
         prompt_text = (row.get("prompt") or {}).get("raw", "") or (row.get("vars") or {}).get("prompt", "") or ""
         output_text = (row.get("response") or {}).get("output", "") or ""
         grading = row.get("gradingResult") or {}
         grader_pass = grading.get("pass")
+        grader_reason = grading.get("reason", "")
+
+        is_grading_error = grader_reason.startswith("API error") or grader_reason.startswith("Error")
+        if not output_text:
+            skipped_errors += 1
+            continue
+
+        if is_grading_error:
+            skipped_errors += 1
+            continue
+
         if grader_pass is None:
             hit = bool(output_text and not REFUSAL_PATTERNS.search(output_text))
         else:
@@ -521,12 +533,12 @@ async def run_promptfoo_redteam(
             "attack": str(prompt_text)[:3000],
             "response": str(output_text)[:3000],
             "detector_hit": hit,
-            "grader_reason": grading.get("reason", ""),
+            "grader_reason": grader_reason,
         })
 
     evidence.sort(key=lambda e: e["detector_hit"], reverse=True)
 
-    attempts = len(rows)
+    attempts = len(rows) - skipped_errors
     asr = successful / attempts if attempts else 0.0
 
     return {

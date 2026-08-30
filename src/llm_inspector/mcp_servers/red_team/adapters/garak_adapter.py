@@ -49,6 +49,19 @@ TECHNIQUE_TO_GARAK_PROBE: dict[str, str] = {
     "unauthorized_tool_invocation": "promptinject.HijackLongPrompt",
     "hallucination_probe": "leakreplay.NYTCloze",
     "poisoned_content_response_probe": "leakreplay.PotterCloze",
+    # Evasion techniques
+    "encoding_bypass": "encoding",
+    "token_smuggling": "smuggling",
+    "ansi_escape_injection": "ansiescape",
+    "glitch_token_exploit": "glitch",
+    # Adaptive / multi-turn
+    "tree_of_attacks": "tap.TAPCached",
+    "auto_attack_gen": "atkgen.Tox",
+    # Social engineering / manipulation
+    "grandma_jailbreak": "grandma",
+    "goodside_injection": "goodside",
+    "deeprole_attack": "dra",
+    "continuation_attack": "continuation",
     # smoke-test / CI use only
     "_smoke_test": "test.Blank",
 }
@@ -78,6 +91,7 @@ async def run_garak_probe(
     max_attempts: int,
     work_dir: Path,
     generations: int = 1,
+    buffs: list[str] | None = None,
 ) -> dict[str, Any]:
     if shutil.which("garak") is None:
         # fall back to `python -m garak`, which is always available if the
@@ -98,6 +112,10 @@ async def run_garak_probe(
         json.dumps({top_module: {"soft_probe_prompt_cap": max(1, max_attempts)}})
     )
 
+    spec_parts = [f"probes.{probe_selector}"]
+    if buffs:
+        spec_parts.extend(f"buffs.{b}" for b in buffs)
+
     cmd = [
         sys.executable,
         "-m",
@@ -106,8 +124,8 @@ async def run_garak_probe(
         "rest",
         "--target_name",
         target_config.uri,
-        "--probes",
-        probe_selector,
+        "--spec",
+        ",".join(spec_parts),
         "--generator_option_file",
         str(genopts_path),
         "--probe_option_file",
@@ -183,10 +201,9 @@ def _parse_garak_report(
         (r.get("total_evaluated", 0) for r in eval_rows), default=len(attempts_by_uuid)
     )
 
-    # collect a few concrete evidence transcripts: prefer attempts where a
-    # detector fired if we can tell, else just include the first few.
-    evidence: list[dict[str, str]] = []
-    for att in list(attempts_by_uuid.values())[:5]:
+    # collect evidence transcripts, prioritizing attempts where a detector fired
+    all_evidence: list[dict[str, Any]] = []
+    for att in attempts_by_uuid.values():
         try:
             prompt_text = att["prompt"]["turns"][-1]["content"]["text"]
         except Exception:
@@ -198,7 +215,7 @@ def _parse_garak_report(
             any(score is not None and score >= 0.5 for score in scores)
             for scores in detector_results.values()
         )
-        evidence.append(
+        all_evidence.append(
             {
                 "attack": prompt_text,
                 "response": output_text,
@@ -206,8 +223,8 @@ def _parse_garak_report(
                 "detector_results": detector_results,
             }
         )
-    # sort so hits show first (most interesting evidence)
-    evidence.sort(key=lambda e: e["detector_hit"], reverse=True)
+    all_evidence.sort(key=lambda e: e["detector_hit"], reverse=True)
+    evidence = all_evidence[:5]
 
     return {
         "tool": "garak",

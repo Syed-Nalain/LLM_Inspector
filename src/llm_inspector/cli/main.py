@@ -325,9 +325,20 @@ def scan_manual(
     base_url: Optional[str] = typer.Option(
         None, help="Base URL (only needed for promptfoo_redteam).",
     ),
+    intensity: str = typer.Option(
+        "medium", "--intensity",
+        help="Scan intensity: very_small, small, medium, large, extended. Controls probe count and attempt limits.",
+    ),
     max_seconds: Optional[int] = typer.Option(None, help="Override the time budget."),
 ) -> None:
     """Run a manual security scan — select OWASP categories and tools directly, no Brain LLM."""
+    from llm_inspector.agent.manual_scan import SCAN_INTENSITIES
+
+    valid_intensities = list(SCAN_INTENSITIES.keys())
+    if intensity not in valid_intensities:
+        console.print(f"[red]Unknown intensity: {intensity}. Choose from: {', '.join(valid_intensities)}[/]")
+        raise typer.Exit(code=1)
+
     if "all" in vuln:
         vuln = list(MANUAL_SCAN_CATALOG.keys())
 
@@ -360,7 +371,9 @@ def scan_manual(
     manager = TargetManager(db)
     runtime = AgentRuntime(settings, db, manager)
 
-    console.print(f"[bold]Manual scan mode[/] — no Brain LLM involved")
+    preset = SCAN_INTENSITIES[intensity]
+    console.print(f"[bold]Manual scan mode[/] — {preset.label} intensity")
+    console.print(f"[dim]{preset.description}[/]")
     console.print(f"[dim]Vulnerabilities: {', '.join(vuln)}[/]")
     console.print(f"[dim]Tools: {', '.join(tool)}[/]")
 
@@ -377,6 +390,7 @@ def scan_manual(
                 max_attempts=max_attempts,
                 num_tests=num_tests,
                 purpose=purpose,
+                intensity=intensity,
                 on_event=on_event,
             )
         except TargetNotAuthorizedError as e:

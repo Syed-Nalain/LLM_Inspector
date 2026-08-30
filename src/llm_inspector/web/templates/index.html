@@ -53,6 +53,14 @@
   .btn-primary:hover { background: #2ea043; }
   .btn-primary:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
 
+  .intensity-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .intensity-card { padding: 10px 12px; background: #0d1117; border: 2px solid #30363d; border-radius: 6px; cursor: pointer; text-align: center; transition: all 0.2s; }
+  .intensity-card:hover { border-color: #58a6ff; }
+  .intensity-card.selected { border-color: #1f6feb; background: #0d1b2e; }
+  .intensity-label { font-size: 13px; font-weight: 600; color: #e1e4e8; }
+  .intensity-desc { font-size: 11px; color: #8b949e; margin-top: 4px; }
+  .intensity-stats { font-size: 10px; color: #58a6ff; margin-top: 4px; font-family: monospace; }
+
   .settings-row { display: flex; gap: 12px; }
   .settings-row .field { flex: 1; }
 
@@ -92,6 +100,7 @@
 <div class="header">
   <h1>LLM Inspector</h1>
   <span class="badge">Security Scanner</span>
+  <a href="/target/new" style="margin-left:auto; color:#58a6ff; text-decoration:none; font-size:14px;">+ Register Target</a>
 </div>
 
 <div class="container">
@@ -159,10 +168,41 @@
         </div>
       </div>
 
+      <div class="field" style="margin-top: 12px;">
+        <label>Scan Intensity</label>
+        <div class="intensity-row">
+          <div class="intensity-card" onclick="setIntensity('very_small', event)">
+            <div class="intensity-label">Very Small</div>
+            <div class="intensity-desc">Quick smoke test</div>
+            <div class="intensity-stats">5 attempts &middot; 2 tests</div>
+          </div>
+          <div class="intensity-card" onclick="setIntensity('small', event)">
+            <div class="intensity-label">Small</div>
+            <div class="intensity-desc">Light coverage</div>
+            <div class="intensity-stats">10 attempts &middot; 3 tests</div>
+          </div>
+          <div class="intensity-card selected" onclick="setIntensity('medium', event)">
+            <div class="intensity-label">Medium</div>
+            <div class="intensity-desc">Balanced scan</div>
+            <div class="intensity-stats">25 attempts &middot; 5 tests</div>
+          </div>
+          <div class="intensity-card" onclick="setIntensity('large', event)">
+            <div class="intensity-label">Large</div>
+            <div class="intensity-desc">Full probe coverage</div>
+            <div class="intensity-stats">50 attempts &middot; 10 tests</div>
+          </div>
+          <div class="intensity-card" onclick="setIntensity('extended', event)">
+            <div class="intensity-label">Extended</div>
+            <div class="intensity-desc">Large + encoding buffs</div>
+            <div class="intensity-stats">50 att &middot; 10 t &middot; buffs</div>
+          </div>
+        </div>
+      </div>
+
       <div class="settings-row" style="margin-top: 12px;">
         <div class="field">
           <label>Max Attempts (garak/promptfoo)</label>
-          <input type="number" id="max-attempts" value="20" min="1" max="100">
+          <input type="number" id="max-attempts" value="25" min="1" max="100">
         </div>
         <div class="field">
           <label>Num Tests (redteam)</label>
@@ -200,6 +240,25 @@
 
 <script>
 let currentMode = 'manual';
+let currentIntensity = 'medium';
+
+const INTENSITY_PRESETS = {
+  very_small: { max_attempts: 5, num_tests: 2 },
+  small: { max_attempts: 10, num_tests: 3 },
+  medium: { max_attempts: 25, num_tests: 5 },
+  large: { max_attempts: 50, num_tests: 10 },
+  extended: { max_attempts: 50, num_tests: 10 },
+};
+
+function setIntensity(level, e) {
+  currentIntensity = level;
+  document.querySelectorAll('.intensity-card').forEach(c => c.classList.remove('selected'));
+  const card = e.currentTarget || e;
+  card.classList.add('selected');
+  const preset = INTENSITY_PRESETS[level];
+  document.getElementById('max-attempts').value = preset.max_attempts;
+  document.getElementById('num-tests').value = preset.num_tests;
+}
 
 function setMode(mode) {
   currentMode = mode;
@@ -252,7 +311,8 @@ function startScan() {
     }
     body.vulns = vulns;
     body.tools = tools;
-    body.max_attempts = parseInt(document.getElementById('max-attempts').value) || 20;
+    body.intensity = currentIntensity;
+    body.max_attempts = parseInt(document.getElementById('max-attempts').value) || 25;
     body.num_tests = parseInt(document.getElementById('num-tests').value) || 5;
   } else {
     body.prompt = document.getElementById('prompt-input').value;
