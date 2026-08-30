@@ -33,6 +33,21 @@ app = Flask(
 scan_logs: dict[str, queue.Queue] = {}
 
 
+def _try_repair_json(text: str) -> dict | None:
+    """Best-effort parse of JSON truncated by the DB storage limit."""
+    if not text or not text.startswith("{"):
+        return None
+    closers = ("]}",  "}]}",  "\"}]}",  "\"}}",  "}}")
+    for trim in range(0, min(len(text), 500), 1):
+        base = text if trim == 0 else text[: len(text) - trim]
+        for c in closers:
+            try:
+                return json.loads(base + c)
+            except (json.JSONDecodeError, ValueError):
+                continue
+    return None
+
+
 def _get_targets() -> list[dict]:
     settings = get_settings()
     db = Database(settings.db_path)
@@ -181,6 +196,111 @@ def stream_logs(scan_id):
             yield f"data: {json.dumps(item)}\n\n"
 
     return Response(generate(), mimetype="text/event-stream")
+
+
+@app.route("/history")
+def history():
+    return render_template("history.html")
+
+
+@app.route("/history/<scan_id>")
+def scan_detail(scan_id):
+    return render_template("scan_detail.html", scan_id=scan_id)
+
+
+@app.route("/api/history")
+def api_history():
+    settings = get_settings()
+    db = Database(settings.db_path)
+    scans = db.list_scans()
+    enriched = []
+    for s in scans:
+        target_data = db.get_target(s["target_id"])
+        target_name = target_data.get("name", s["target_id"]) if target_data else s["target_id"]
+        findings = db.list_findings(s["id"])
+        usage = json.loads(s["usage"]) if s.get("usage") else {}
+        sev_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
+        for f in findings:
+            sv = (f.get("severity") or "INFO").upper()
+            sev_counts[sv] = sev_counts.get(sv, 0) + 1
+        enriched.append({
+            "id": s["id"],
+            "target_id": s["target_id"],
+            "target_name": target_name,
+            "status": s["status"],
+            "started_at": s["started_at"],
+            "finished_at": s.get("finished_at"),
+            "findings_count": len(findings),
+            "severity": sev_counts,
+            "elapsed": usage.get("elapsed_seconds", 0),
+            "tool_calls": usage.get("tool_calls_made", 0),
+            "mode": s.get("mode", "manual"),
+        })
+    return {"scans": enriched}
+
+
+@app.route("/api/scan/<scan_id>")
+def api_scan_detail(scan_id):
+    settings = get_settings()
+    db = Database(settings.db_path)
+    scan = db.get_scan(scan_id)
+    if not scan:
+        return {"error": "Scan not found"}, 404
+
+    target_data = db.get_target(scan["target_id"])
+    target_name = target_data.get("name", scan["target_id"]) if target_data else scan["target_id"]
+
+    tool_calls = db.list_tool_calls(scan_id)
+    parsed_calls = []
+    for tc in tool_calls:
+        args = json.loads(tc["arguments"]) if tc.get("arguments") else {}
+        result_raw = json.loads(tc["result"]) if tc.get("result") else {}
+        result_text = result_raw.get("text", "")
+        is_error = result_raw.get("is_error", False)
+        try:
+            result_data = json.loads(result_text)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            result_data = _try_repair_json(result_text)
+        parsed_calls.append({
+            "id": tc["id"],
+            "seq": tc["seq"],
+            "tool_name": tc["tool_name"],
+            "arguments": args,
+            "is_error": is_error,
+            "result_data": result_data,
+            "result_text": result_text,
+            "started_at": tc["started_at"],
+            "finished_at": tc.get("finished_at"),
+        })
+
+    findings = db.list_findings(scan_id)
+    usage = json.loads(scan["usage"]) if scan.get("usage") else {}
+
+    log_path = settings.data_dir / "logs" / f"{scan_id}.scan.log"
+    log_text = ""
+    if log_path.exists():
+        log_text = log_path.read_text(encoding="utf-8", errors="replace")
+
+    report_md_path = settings.data_dir / "reports" / f"{scan_id}.report.md"
+    report_md = ""
+    if report_md_path.exists():
+        report_md = report_md_path.read_text(encoding="utf-8", errors="replace")
+
+    return {
+        "scan": {
+            "id": scan["id"],
+            "target_id": scan["target_id"],
+            "target_name": target_name,
+            "status": scan["status"],
+            "started_at": scan["started_at"],
+            "finished_at": scan.get("finished_at"),
+        },
+        "usage": usage,
+        "tool_calls": parsed_calls,
+        "findings": findings,
+        "log_text": log_text,
+        "report_md": report_md,
+    }
 
 
 @app.route("/target/new")

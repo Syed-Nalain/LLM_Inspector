@@ -259,7 +259,7 @@ class AgentRuntime:
                     slog.log_tool_call(
                         tool_name=tc.name,
                         arguments=tc.arguments,
-                        result_text=outcome.text[:4000],
+                        result_text=outcome.text[:64000],
                         is_error=outcome.is_error,
                         duration_seconds=round(call_duration, 1),
                         result_stats=_parsed_stats,
@@ -271,7 +271,7 @@ class AgentRuntime:
                         seq=budget.tool_calls_made,
                         tool_name=tc.name,
                         arguments=tc.arguments,
-                        result={"is_error": outcome.is_error, "text": outcome.text[:4000]},
+                        result={"is_error": outcome.is_error, "text": outcome.text[:64000]},
                         started_at=datetime.fromtimestamp(
                             time.time() - call_duration, tz=timezone.utc
                         ).isoformat(),
@@ -539,7 +539,7 @@ class AgentRuntime:
                 slog.log_tool_call(
                     tool_name=call["tool_name"],
                     arguments=call["args"],
-                    result_text=outcome.text[:4000],
+                    result_text=outcome.text[:64000],
                     is_error=outcome.is_error,
                     duration_seconds=round(call_duration, 1),
                     result_stats=_parsed_stats,
@@ -550,7 +550,7 @@ class AgentRuntime:
                     seq=i,
                     tool_name=call["tool_name"],
                     arguments=call["args"],
-                    result={"is_error": outcome.is_error, "text": outcome.text[:4000]},
+                    result={"is_error": outcome.is_error, "text": outcome.text[:64000]},
                     started_at=datetime.fromtimestamp(
                         time.time() - call_duration, tz=timezone.utc
                     ).isoformat(),

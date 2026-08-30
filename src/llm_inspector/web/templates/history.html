@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scan History — LLM Inspector</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
+
+  /* Header */
+  .header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 24px; display: flex; align-items: center; gap: 12px; }
+  .header h1 { font-size: 18px; font-weight: 600; color: #e6edf3; }
+  .header .badge { background: #238636; color: #fff; font-size: 10px; padding: 2px 8px; border-radius: 12px; font-weight: 600; }
+  .header nav { margin-left: auto; display: flex; gap: 20px; }
+  .header nav a { color: #8b949e; text-decoration: none; font-size: 13px; font-weight: 500; transition: color 0.15s; }
+  .header nav a:hover, .header nav a.active { color: #58a6ff; }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+  /* Summary strip */
+  .summary-strip {
+    display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap;
+  }
+  .summary-chip {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    padding: 14px 20px; display: flex; align-items: center; gap: 10px; min-width: 140px;
+  }
+  .summary-chip .num { font-size: 24px; font-weight: 700; color: #e6edf3; }
+  .summary-chip .lbl { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
+  .chip-critical .num { color: #f85149; }
+  .chip-high .num { color: #db6d28; }
+  .chip-clean .num { color: #3fb950; }
+
+  /* Toolbar */
+  .toolbar {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+  }
+  .search-box {
+    flex: 1; min-width: 200px; max-width: 360px;
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 7px 12px; color: #c9d1d9; font-size: 13px; outline: none;
+  }
+  .search-box:focus { border-color: #58a6ff; }
+  .search-box::placeholder { color: #484f58; }
+  .filter-btn {
+    background: #21262d; border: 1px solid #30363d; border-radius: 6px;
+    padding: 7px 14px; color: #c9d1d9; font-size: 12px; cursor: pointer;
+    transition: all 0.15s; font-weight: 500;
+  }
+  .filter-btn:hover { border-color: #58a6ff; color: #58a6ff; }
+  .filter-btn.active { background: #0d419d; border-color: #388bfd; color: #e6edf3; }
+  .sort-label { font-size: 12px; color: #8b949e; margin-left: auto; }
+
+  /* Table */
+  .scan-table { width: 100%; border-collapse: collapse; }
+  .scan-table th {
+    text-align: left; padding: 10px 12px; font-size: 11px; font-weight: 600;
+    color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px;
+    border-bottom: 1px solid #30363d; background: #161b22;
+    cursor: pointer; user-select: none; white-space: nowrap;
+    position: sticky; top: 0; z-index: 1;
+  }
+  .scan-table th:hover { color: #c9d1d9; }
+  .scan-table th .sort-arrow { font-size: 10px; margin-left: 4px; opacity: 0.4; }
+  .scan-table th.sorted .sort-arrow { opacity: 1; color: #58a6ff; }
+  .scan-table td {
+    padding: 12px 12px; font-size: 13px; border-bottom: 1px solid #21262d;
+    vertical-align: middle;
+  }
+  .scan-table tr { cursor: pointer; transition: background 0.1s; }
+  .scan-table tbody tr:hover { background: #161b22; }
+
+  /* Cell styles */
+  .cell-id { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; font-size: 12px; color: #58a6ff; font-weight: 600; }
+  .cell-target { font-weight: 500; color: #e6edf3; }
+  .cell-target .target-sub { font-size: 11px; color: #484f58; font-weight: 400; }
+  .cell-date { color: #8b949e; font-size: 12px; white-space: nowrap; }
+  .cell-duration { color: #8b949e; font-size: 12px; font-family: monospace; }
+
+  /* Status pill */
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 12px;
+    text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .status-pill .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .st-completed { background: #0d3117; color: #3fb950; }
+  .st-completed .dot { background: #3fb950; }
+  .st-running { background: #1a1a00; color: #d29922; }
+  .st-running .dot { background: #d29922; animation: pulse 1.5s infinite; }
+  .st-failed, .st-error { background: #2d1117; color: #f85149; }
+  .st-failed .dot, .st-error .dot { background: #f85149; }
+
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  /* Severity columns */
+  .sev-cell { text-align: center; font-size: 13px; font-weight: 600; font-family: monospace; min-width: 28px; }
+  .sev-cell.has-value { }
+  .sev-cell.zero { color: #30363d; }
+  .sev-crit { color: #f85149; }
+  .sev-high { color: #db6d28; }
+  .sev-med { color: #d29922; }
+  .sev-low { color: #58a6ff; }
+  .sev-info { color: #8b949e; }
+
+  /* Result bar — mini stacked bar */
+  .result-bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .result-bar {
+    width: 80px; height: 6px; background: #21262d; border-radius: 3px;
+    overflow: hidden; display: flex;
+  }
+  .result-bar .seg-fail { background: #f85149; }
+  .result-bar .seg-pass { background: #3fb950; }
+  .result-label { font-size: 11px; color: #8b949e; white-space: nowrap; }
+
+  /* Empty / loading */
+  .empty-state { text-align: center; padding: 80px 20px; }
+  .empty-state h3 { font-size: 16px; color: #e6edf3; margin-bottom: 8px; }
+  .empty-state p { font-size: 13px; color: #8b949e; }
+  .empty-state a { color: #58a6ff; }
+  .loading { text-align: center; padding: 60px; color: #8b949e; font-size: 13px; }
+  .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.7s linear infinite; margin-right: 8px; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .scan-table th.hide-sm, .scan-table td.hide-sm { display: none; }
+    .summary-strip { gap: 8px; }
+    .summary-chip { padding: 10px 14px; min-width: 100px; }
+    .summary-chip .num { font-size: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>LLM Inspector</h1>
+  <span class="badge">Security Scanner</span>
+  <nav>
+    <a href="/">New Scan</a>
+    <a href="/history" class="active">History</a>
+    <a href="/target/new">+ Target</a>
+  </nav>
+</div>
+
+<div class="container">
+  <!-- Summary strip -->
+  <div class="summary-strip" id="summary-strip"></div>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <input type="text" class="search-box" id="search" placeholder="Search scans by target, ID, or status...">
+    <button class="filter-btn" data-filter="all" onclick="setFilter('all')">All</button>
+    <button class="filter-btn" data-filter="vuln" onclick="setFilter('vuln')">With Findings</button>
+    <button class="filter-btn" data-filter="clean" onclick="setFilter('clean')">Clean</button>
+    <button class="filter-btn" data-filter="failed" onclick="setFilter('failed')">Failed</button>
+  </div>
+
+  <!-- Table -->
+  <div id="table-wrap">
+    <div class="loading" id="loading"><span class="spinner"></span>Loading scan history...</div>
+  </div>
+</div>
+
+<script>
+let ALL_SCANS = [];
+let currentFilter = 'all';
+let sortCol = 'started_at';
+let sortAsc = false;
+
+fetch('/api/history')
+  .then(r => r.json())
+  .then(data => {
+    ALL_SCANS = data.scans || [];
+    renderSummary();
+    renderTable();
+    setFilter('all');
+  })
+  .catch(err => {
+    document.getElementById('table-wrap').innerHTML =
+      '<div class="empty-state"><h3>Error loading scans</h3><p>' + esc(String(err)) + '</p></div>';
+  });
+
+function renderSummary() {
+  const total = ALL_SCANS.length;
+  const withFindings = ALL_SCANS.filter(s => s.findings_count > 0).length;
+  const clean = ALL_SCANS.filter(s => s.findings_count === 0 && s.status === 'completed').length;
+  const critTotal = ALL_SCANS.reduce((a, s) => a + (s.severity?.CRITICAL || 0), 0);
+  const highTotal = ALL_SCANS.reduce((a, s) => a + (s.severity?.HIGH || 0), 0);
+
+  document.getElementById('summary-strip').innerHTML = `
+    <div class="summary-chip">
+      <div><div class="num">${total}</div><div class="lbl">Total Scans</div></div>
+    </div>
+    <div class="summary-chip chip-critical">
+      <div><div class="num">${critTotal}</div><div class="lbl">Critical</div></div>
+    </div>
+    <div class="summary-chip chip-high">
+      <div><div class="num">${highTotal}</div><div class="lbl">High</div></div>
+    </div>
+    <div class="summary-chip">
+      <div><div class="num">${withFindings}</div><div class="lbl">With Findings</div></div>
+    </div>
+    <div class="summary-chip chip-clean">
+      <div><div class="num">${clean}</div><div class="lbl">Clean</div></div>
+    </div>`;
+}
+
+function renderTable() {
+  let scans = filterScans(ALL_SCANS);
+  scans = sortScans(scans);
+
+  if (scans.length === 0) {
+    document.getElementById('table-wrap').innerHTML =
+      '<div class="empty-state"><h3>No scans found</h3><p>Run your first scan from the <a href="/">home page</a>.</p></div>';
+    return;
+  }
+
+  const arrow = (col) => `<span class="sort-arrow">${sortCol === col ? (sortAsc ? '▲' : '▼') : '⇅'}</span>`;
+  const sorted = (col) => sortCol === col ? 'sorted' : '';
+
+  let html = `<table class="scan-table">
+    <thead><tr>
+      <th class="${sorted('started_at')}" onclick="doSort('started_at')">Date ${arrow('started_at')}</th>
+      <th class="${sorted('id')}" onclick="doSort('id')">Scan ID ${arrow('id')}</th>
+      <th class="${sorted('target_name')}" onclick="doSort('target_name')">Target ${arrow('target_name')}</th>
+      <th class="${sorted('status')}" onclick="doSort('status')">Status ${arrow('status')}</th>
+      <th class="${sorted('sev_crit')}" onclick="doSort('sev_crit')" style="text-align:center;">Crit ${arrow('sev_crit')}</th>
+      <th class="${sorted('sev_high')}" onclick="doSort('sev_high')" style="text-align:center;">High ${arrow('sev_high')}</th>
+      <th class="${sorted('sev_med')}" onclick="doSort('sev_med')" style="text-align:center;" class="hide-sm">Med ${arrow('sev_med')}</th>
+      <th class="${sorted('sev_low')}" onclick="doSort('sev_low')" style="text-align:center;" class="hide-sm">Low ${arrow('sev_low')}</th>
+      <th class="${sorted('findings_count')}" onclick="doSort('findings_count')">Total ${arrow('findings_count')}</th>
+      <th class="${sorted('tool_calls')}" onclick="doSort('tool_calls')" class="hide-sm">Probes ${arrow('tool_calls')}</th>
+      <th class="${sorted('elapsed')}" onclick="doSort('elapsed')" class="hide-sm">Duration ${arrow('elapsed')}</th>
+    </tr></thead><tbody>`;
+
+  scans.forEach(s => {
+    const sev = s.severity || {};
+    const crit = sev.CRITICAL || 0;
+    const high = sev.HIGH || 0;
+    const med = sev.MEDIUM || 0;
+    const low = sev.LOW || 0;
+
+    const date = formatDate(s.started_at);
+    const elapsed = s.elapsed ? formatDuration(s.elapsed) : '—';
+    const statusCls = 'st-' + s.status;
+
+    const totalFindings = s.findings_count;
+    const findingsColor = totalFindings > 0 ? (crit > 0 ? '#f85149' : high > 0 ? '#db6d28' : '#d29922') : '#3fb950';
+
+    html += `<tr onclick="window.location='/history/${s.id}'">
+      <td class="cell-date">${date}</td>
+      <td class="cell-id">${s.id}</td>
+      <td class="cell-target">${esc(s.target_name)}</td>
+      <td><span class="status-pill ${statusCls}"><span class="dot"></span>${s.status}</span></td>
+      <td class="sev-cell ${crit > 0 ? 'sev-crit' : 'zero'}">${crit || '—'}</td>
+      <td class="sev-cell ${high > 0 ? 'sev-high' : 'zero'}">${high || '—'}</td>
+      <td class="sev-cell hide-sm ${med > 0 ? 'sev-med' : 'zero'}">${med || '—'}</td>
+      <td class="sev-cell hide-sm ${low > 0 ? 'sev-low' : 'zero'}">${low || '—'}</td>
+      <td style="font-weight:600; color:${findingsColor}; text-align:center;">${totalFindings}</td>
+      <td class="cell-duration hide-sm">${s.tool_calls}</td>
+      <td class="cell-duration hide-sm">${elapsed}</td>
+    </tr>`;
+  });
+
+  html += '</tbody></table>';
+  document.getElementById('table-wrap').innerHTML = html;
+}
+
+function filterScans(scans) {
+  const q = document.getElementById('search').value.toLowerCase().trim();
+  let filtered = scans;
+
+  if (q) {
+    filtered = filtered.filter(s =>
+      s.id.toLowerCase().includes(q) ||
+      s.target_name.toLowerCase().includes(q) ||
+      s.status.toLowerCase().includes(q)
+    );
+  }
+
+  if (currentFilter === 'vuln') filtered = filtered.filter(s => s.findings_count > 0);
+  else if (currentFilter === 'clean') filtered = filtered.filter(s => s.findings_count === 0 && s.status === 'completed');
+  else if (currentFilter === 'failed') filtered = filtered.filter(s => s.status === 'failed' || s.status === 'error');
+
+  return filtered;
+}
+
+function sortScans(scans) {
+  return [...scans].sort((a, b) => {
+    let va, vb;
+    if (sortCol === 'sev_crit') { va = a.severity?.CRITICAL || 0; vb = b.severity?.CRITICAL || 0; }
+    else if (sortCol === 'sev_high') { va = a.severity?.HIGH || 0; vb = b.severity?.HIGH || 0; }
+    else if (sortCol === 'sev_med') { va = a.severity?.MEDIUM || 0; vb = b.severity?.MEDIUM || 0; }
+    else if (sortCol === 'sev_low') { va = a.severity?.LOW || 0; vb = b.severity?.LOW || 0; }
+    else { va = a[sortCol]; vb = b[sortCol]; }
+    if (va == null) va = '';
+    if (vb == null) vb = '';
+    if (typeof va === 'number' && typeof vb === 'number') return sortAsc ? va - vb : vb - va;
+    return sortAsc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+  });
+}
+
+function doSort(col) {
+  if (sortCol === col) sortAsc = !sortAsc;
+  else { sortCol = col; sortAsc = false; }
+  renderTable();
+}
+
+function setFilter(f) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.filter === f);
+  });
+  renderTable();
+}
+
+document.getElementById('search').addEventListener('input', () => renderTable());
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const now = new Date();
+  const diff = (now - d) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  if (diff < 604800) return Math.floor(diff / 86400) + 'd ago';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+}
+
+function formatDuration(sec) {
+  if (!sec) return '—';
+  if (sec < 60) return sec.toFixed(1) + 's';
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return m + 'm ' + s + 's';
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+</script>
+</body>
+</html>
